@@ -1,0 +1,6 @@
+services:
+  httpstat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: httpstat-test
