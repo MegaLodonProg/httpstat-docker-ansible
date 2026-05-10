@@ -1,0 +1,80 @@
+---
+- name: Install Docker and run httpstat container
+  hosts: targets
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker.io
+          - python3-pip
+        state: present
+
+    - name: Add user to docker group
+      user:
+        name: "{{ lookup('env', 'USER') }}"
+        groups: docker
+        append: yes
+
+    - name: Start docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Verify Docker installation
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Show Docker version
+      debug:
+        msg: "Docker installed: {{ docker_version.stdout }}"
+
+    - name: Build Docker image
+      command: docker build -t httpstat-script -f {{ playbook_dir }}/../docker/Dockerfile {{ playbook_dir }}/..
+      register: build_result
+      changed_when: "'Successfully built' in build_result.stdout or 'writing image sha256' in build_result.stdout"
+
+    - name: Remove old container if exists
+      command: docker rm -f httpstat-test
+      register: remove_old_container
+      failed_when: false
+      changed_when: remove_old_container.rc == 0
+
+    - name: Run container in detached mode
+      command: docker run -d --name httpstat-test httpstat-script
+      register: container_run
+      changed_when: true
+
+    - name: Wait for container to finish
+      command: docker wait httpstat-test
+      register: container_exit_code
+      changed_when: false
+
+    - name: Get container logs
+      command: docker logs httpstat-test
+      register: container_logs
+      changed_when: false
+
+    - name: Show container logs
+      debug:
+        msg: "{{ container_logs.stdout }}"
+
+    - name: Check container exit code
+      assert:
+        that:
+          - container_exit_code.stdout | int == 1
+        fail_msg: "Expected exit code 1 because the script intentionally hits 404/500, got {{ container_exit_code.stdout }}"
+        success_msg: "Script correctly finished with code 1"
+
+    - name: Final status
+      debug:
+        msg: "Playbook completed successfully"
